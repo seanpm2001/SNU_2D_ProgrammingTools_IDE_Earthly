@@ -1,0 +1,236 @@
+VERSION 0.6
+ARG DOCKERHUB_USER_SECRET=+secrets/DOCKERHUB_USER
+ARG DOCKERHUB_TOKEN_SECRET=+secrets/DOCKERHUB_TOKEN
+ARG DOCKERHUB_MIRROR
+ARG DOCKERHUB_MIRROR_INSECURE=false
+ARG DOCKERHUB_AUTH=true
+FROM ../..+earthly-integration-test-base \
+    --DOCKERHUB_AUTH=$DOCKERHUB_AUTH \
+    --DOCKERHUB_USER_SECRET=$DOCKERHUB_USER_SECRET \
+    --DOCKERHUB_TOKEN_SECRET=$DOCKERHUB_TOKEN_SECRET \
+    --DOCKERHUB_MIRROR=$DOCKERHUB_MIRROR \
+    --DOCKERHUB_MIRROR_INSECURE=$DOCKERHUB_MIRROR_INSECURE
+
+ENV EARTHLY_SHOW_HIDDEN=0
+
+test-root-commands:
+    RUN echo "account 
+bootstrap 
+config 
+ls 
+org 
+preview 
+prune 
+satellite 
+secret " > expected
+    RUN COMP_LINE="earthly " COMP_POINT=8 earthly > actual
+    RUN diff expected actual
+
+test-hidden-root-commands:
+    ENV EARTHLY_SHOW_HIDDEN=1
+    RUN echo "account 
+bootstrap 
+build 
+config 
+debug 
+docker 
+docker2earthly 
+ls 
+org 
+preview 
+prune 
+satellite 
+secret " > expected
+    RUN COMP_LINE="earthly " COMP_POINT=8 earthly > actual
+    RUN diff expected actual
+
+test-build-flags:
+    RUN COMP_LINE="earthly --" COMP_POINT=10 earthly | grep -- "--allow-privileged"
+
+test-targets:
+    COPY fake.earth ./Earthfile
+
+    RUN echo "+mytarget 
++othertarget 
++othertargetwithargs 
++targetwithrequiredarg " > expected
+    RUN COMP_LINE="earthly +" COMP_POINT=9 earthly > actual
+    RUN diff expected actual
+
+    RUN echo "+mytarget " > expected
+    RUN COMP_LINE="earthly +m" COMP_POINT=10 earthly > actual
+    RUN diff expected actual
+
+test-targets-without-version:
+    COPY fake.earth ./Earthfile
+    RUN mv Earthfile Earthfile.bkup && cat Earthfile.bkup | grep -v VERSION > Earthfile
+
+    RUN echo "+mytarget 
++othertarget 
++othertargetwithargs 
++targetwithrequiredarg " > expected
+    RUN COMP_LINE="earthly +" COMP_POINT=9 earthly > actual
+    RUN diff expected actual
+
+    RUN echo "+mytarget " > expected
+    RUN COMP_LINE="earthly +m" COMP_POINT=10 earthly > actual 2> errlog
+    RUN diff expected actual
+    RUN test -f errlog && ! test -s errlog
+
+test-target-with-build-args:
+    COPY fake.earth ./Earthfile
+
+    RUN echo "--city=
+--country=" > expected
+    RUN COMP_LINE="earthly +othertargetwithargs -" COMP_POINT=30 earthly > actual
+    RUN diff expected actual
+
+    RUN echo "--city=
+--country=" > expected
+    RUN COMP_LINE="earthly +othertargetwithargs --c" COMP_POINT=32 earthly > actual
+    RUN diff expected actual
+
+    RUN echo "--city=" > expected
+    RUN COMP_LINE="earthly +othertargetwithargs --ci" COMP_POINT=33 earthly > actual
+    RUN diff expected actual
+
+    RUN > expected
+    RUN COMP_LINE="earthly +othertargetwithargs --city=" COMP_POINT=36 earthly > actual
+    RUN diff expected actual
+
+    RUN > expected
+    RUN COMP_LINE="earthly +othertargetwithargs --city=foo" COMP_POINT=39 earthly > actual
+    RUN diff expected actual
+
+test-targets-from-other-dir:
+    RUN mkdir -p child/dir
+    COPY fake.earth child/dir/Earthfile
+
+    RUN echo "./child/dir+mytarget 
+./child/dir+othertarget 
+./child/dir+othertargetwithargs 
+./child/dir+targetwithrequiredarg " > expected
+    RUN COMP_LINE="earthly ./child/dir+" COMP_POINT=20 earthly > actual
+    RUN diff expected actual
+
+    RUN echo "./child/dir+mytarget " > expected
+    RUN COMP_LINE="earthly ./child/dir+m" COMP_POINT=21 earthly > actual
+    RUN diff expected actual
+
+test-target-with-build-args-from-other-dir:
+    RUN mkdir -p child/dir
+    COPY fake.earth child/dir/Earthfile
+
+    RUN echo "--city=
+--country=" > expected
+    RUN COMP_LINE="earthly ./child/dir+othertargetwithargs -" COMP_POINT=41 earthly > actual
+    RUN diff expected actual
+
+    RUN echo "--city=
+--country=" > expected
+    RUN COMP_LINE="earthly ./child/dir+othertargetwithargs --c" COMP_POINT=43 earthly > actual
+    RUN diff expected actual
+
+    RUN echo "--city=" > expected
+    RUN COMP_LINE="earthly ./child/dir+othertargetwithargs --ci" COMP_POINT=44 earthly > actual
+    RUN diff expected actual
+
+test-target-with-required-arg:
+    COPY fake.earth Earthfile
+
+    RUN echo "--musthave=" > expected
+    RUN COMP_LINE="earthly +targetwithrequiredarg -" COMP_POINT=32 earthly > actual
+    RUN diff expected actual
+
+test-base-only-target:
+    COPY base.earth ./Earthfile
+    RUN echo "+base " > expected
+    RUN COMP_LINE="earthly +" COMP_POINT=9 earthly > actual
+    RUN diff expected actual
+
+test-no-parent-at-root:
+    WORKDIR /
+    RUN echo "./" > expected
+    RUN COMP_LINE="earthly ." COMP_POINT=9 earthly > actual
+    RUN diff expected actual
+
+test-no-parent-at-root-from-home:
+    WORKDIR /home
+    RUN echo "../dev/
+../etc/
+../lib/
+../media/
+../proc/
+../root/
+../run/
+../sys/
+../usr/
+../var/" > expected
+    RUN COMP_LINE="earthly ../" COMP_POINT=11 earthly > actual
+    RUN diff expected actual
+
+test-relative-dir-targets:
+    RUN mkdir -p /test/foo
+    COPY fake.earth /test/foo/Earthfile
+    WORKDIR /test/
+    RUN echo "./foo+" > expected
+    RUN COMP_LINE="earthly ./" COMP_POINT=10 earthly > actual
+    RUN diff expected actual
+    RUN echo "./foo+mytarget 
+./foo+othertarget 
+./foo+othertargetwithargs 
+./foo+targetwithrequiredarg " > expected
+    RUN COMP_LINE="earthly ./foo+" COMP_POINT=14 earthly > actual
+    RUN diff expected actual
+
+test-targets-in-dir-and-subdir:
+    RUN mkdir -p /test/foo/subdir
+    COPY fake.earth /test/foo/Earthfile
+    COPY fake.earth /test/foo/subdir/Earthfile
+
+    WORKDIR /test/
+    RUN echo "./foo+
+./foo/" > expected
+    RUN COMP_LINE="earthly ./" COMP_POINT=10 earthly > actual
+    RUN diff expected actual
+
+    RUN COMP_LINE="earthly ./f" COMP_POINT=11 earthly > actual
+    RUN diff expected actual
+
+    RUN COMP_LINE="earthly ./foo" COMP_POINT=13 earthly > actual
+    RUN diff expected actual
+
+test-targets-in-two-subdirs-that-are-similar:
+    COPY fake.earth /test/foo/subdir/Earthfile
+    COPY fake.earth /test/food/subdir/Earthfile
+
+    WORKDIR /test/
+    RUN echo "./foo/
+./food/" > expected
+    RUN COMP_LINE="earthly ./" COMP_POINT=10 earthly > actual
+    RUN diff expected actual
+
+    RUN COMP_LINE="earthly ./f" COMP_POINT=11 earthly > actual
+    RUN diff expected actual
+
+    RUN COMP_LINE="earthly ./foo" COMP_POINT=13 earthly > actual
+    RUN diff expected actual
+
+test-all:
+    BUILD +test-root-commands
+    BUILD +test-hidden-root-commands
+    BUILD +test-build-flags
+    BUILD +test-targets
+    BUILD +test-targets-without-version
+    BUILD +test-targets-from-other-dir
+    BUILD +test-target-with-build-args
+    BUILD +test-target-with-build-args-from-other-dir
+    BUILD +test-target-with-required-arg
+    BUILD +test-base-only-target
+    BUILD +test-relative-dir-targets
+    BUILD +test-no-parent-at-root
+    BUILD +test-no-parent-at-root-from-home
+    BUILD +test-targets-in-dir-and-subdir
+    BUILD +test-targets-in-two-subdirs-that-are-similar
+
+# Taken from: https://github.com/earthly/earthly/blob/main/tests/autocompletion/Earthfile
